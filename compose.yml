@@ -15,3 +15,18 @@ services:
       - ${STATE_DIR:-./state}:/data
     environment:
       PUBLIC_URL: ${PUBLIC_URL:-}
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+
+  # Checks for a new image every hour and redeploys the judge when there is one. It only touches
+  # containers labelled com.centurylinklabs.watchtower.enable=true.
+  watchtower:
+    image: nickfedor/watchtower:latest
+    container_name: ygo-judge-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_POLL_INTERVAL: "3600"
+      WATCHTOWER_CLEANUP: "true"

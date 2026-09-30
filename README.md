@@ -92,16 +92,11 @@ The server needs about 100 MB of RAM.
 
 Put a reverse proxy with HTTPS in front of `127.0.0.1:8010`, e.g. Nginx Proxy Manager, Caddy or a
 Cloudflare Tunnel. On first start the server creates its access key in `STATE_DIR/access_key` and
-prints the connector URL in its log. To update, pull the new image (in Portainer, **Pull and
-redeploy**).
+prints the connector URL in its log.
 
-### On a Mac with Apple's `container`
-
-[`scripts/run-local.sh`](scripts/run-local.sh) builds the image, runs it with Apple's
-[`container`](https://github.com/apple/container) and exposes it through a Cloudflare quick tunnel,
-which gets a new random address on every run. To use a fixed address instead, save a Cloudflare
-tunnel token in `state/tunnel_token` and the tunnel's URL in `state/tunnel_url`. Port publishing
-needs macOS Local Network access for `container`.
+Updates are automatic. The stack includes [Watchtower](https://github.com/nicholas-fedor/watchtower),
+which checks for a new image every hour and redeploys the judge when there is one. It only touches
+containers labelled `com.centurylinklabs.watchtower.enable=true`.
 
 ## Development
 

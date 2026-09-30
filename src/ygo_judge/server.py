@@ -31,7 +31,7 @@ def _setting(name: str) -> str:
 
 
 def public_url() -> str:
-    """Base URL for download links (a quick tunnel's address changes on every start)."""
+    """Base URL for puzzle download links."""
     return _setting("PUBLIC_URL").rstrip("/")
 
 
