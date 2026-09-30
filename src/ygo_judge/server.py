@@ -206,6 +206,8 @@ def get_rulings(cards: list[str]) -> str:
         return rulings(cards)
     except OSError as e:
         return f"The rulings database is unavailable right now ({e})."
+    except (ValueError, KeyError, TypeError, AttributeError) as e:  # unexpected data from the external database
+        return f"Couldn't read the rulings database's answer ({type(e).__name__}: {e})."
 
 
 @mcp.tool(annotations=READ_ONLY, structured_output=False)

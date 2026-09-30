@@ -46,6 +46,14 @@ def card_id(name: str) -> tuple[int, str] | None:
     return by_key[close[0]] if close else None
 
 
+def _section(key: str) -> tuple:
+    """Sort key for FAQ sections, numbered "0", "1", "1.5", ..."""
+    try:
+        return (0, float(key), "")
+    except ValueError:
+        return (1, 0.0, key)
+
+
 def _text(entry: dict) -> str:
     return entry.get("en") or entry.get("ja") or ""
 
@@ -68,7 +76,7 @@ def rulings(cards: list[str]) -> str:
         found.append((official, data))
         faq = data.get("faqData") or {}
         lines = [f"== {official} — FAQ (Konami, translated) =="]
-        for _, entries in sorted((faq.get("entries") or {}).items(), key=lambda kv: int(kv[0])):
+        for _, entries in sorted((faq.get("entries") or {}).items(), key=lambda kv: _section(kv[0])):
             lines += [f"- {_fill_names(_text(e), names)}" for e in entries if _text(e)]
         if len(lines) == 1:
             lines.append("- (no FAQ entries)")
