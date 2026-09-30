@@ -76,8 +76,8 @@ password.
 
 ## Self-hosting
 
-The image `ghcr.io/lukaznj/ygo-judge` is built for `linux/arm64` (Raspberry Pi 4/5, Apple silicon)
-and `linux/amd64`. It is rebuilt every week with the latest engine, card scripts and databases.
+The image `ghcr.io/lukaznj/ygo-judge` is built for `linux/arm64` (Raspberry Pi 4/5, Apple silicon);
+for x86 servers, build it yourself from the `Containerfile`. It is rebuilt every week with the latest engine, card scripts and databases.
 The server needs about 100 MB of RAM.
 
 ### Docker Compose or Portainer
