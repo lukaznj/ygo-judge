@@ -1,0 +1,31 @@
+[project]
+name = "ygo-judge"
+version = "0.1.0"
+description = "Test Yu-Gi-Oh! rulings from Claude on EDOPro's rules engine (MCP server)"
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+authors = [
+    { name = "Luka Ražem", email = "luka@razem.cc" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "mcp>=2.2,<3",
+]
+
+[project.scripts]
+ygo-judge = "ygo_judge:main"
+
+[build-system]
+requires = ["uv_build>=0.9.9,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.ruff]
+line-length = 140
+
+[tool.ruff.lint]
+extend-select = ["I", "UP", "B"]

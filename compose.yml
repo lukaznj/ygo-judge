@@ -1,0 +1,17 @@
+# Docker Compose file, also usable as a Portainer stack. Put a reverse proxy with HTTPS in front of
+# port 8010. Variables:
+#   STATE_DIR   host folder for the access key, saved duels and the rulings cache (use an absolute
+#               path in Portainer)
+#   PUBLIC_URL  the address people reach the server at, e.g. https://ygo-judge.example.com (used
+#               for puzzle download links)
+services:
+  ygo-judge:
+    image: ghcr.io/lukaznj/ygo-judge:latest
+    container_name: ygo-judge
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8010:8000"
+    volumes:
+      - ${STATE_DIR:-./state}:/data
+    environment:
+      PUBLIC_URL: ${PUBLIC_URL:-}
