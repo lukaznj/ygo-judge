@@ -254,7 +254,7 @@ def main() -> None:
         (STATE / "access_key").write_text(key + "\n")
     if not re.fullmatch(r"[A-Za-z0-9_-]{8,}", key):
         raise SystemExit("ACCESS_KEY must be at least 8 characters of A-Z, a-z, 0-9, _ or -.")
-    print(f"Claude connector URL: {public_url() or 'https://<your host>'}/{key}/mcp", flush=True)
+    print(f"MCP server URL (ChatGPT or Claude): {public_url() or 'https://<your host>'}/{key}/mcp", flush=True)
     mcp.run(
         transport="streamable-http",
         host=os.environ.get("HOST", "127.0.0.1"),
