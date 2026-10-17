@@ -1,7 +1,7 @@
 [project]
 name = "ygo-judge"
 version = "0.1.0"
-description = "Test Yu-Gi-Oh! rulings from Claude on EDOPro's rules engine (MCP server)"
+description = "Test Yu-Gi-Oh! rulings in ChatGPT or Claude on EDOPro's rules engine (MCP server)"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
 authors = [

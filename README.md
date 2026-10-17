@@ -1,13 +1,13 @@
 # YGO Judge
 
-Settle Yu-Gi-Oh! ruling questions by asking Claude. YGO Judge is an [MCP](https://modelcontextprotocol.io)
-server that lets Claude use EDOPro's rules engine. Claude builds the board, plays both players,
+Settle Yu-Gi-Oh! ruling questions with ChatGPT or Claude. YGO Judge is an [MCP](https://modelcontextprotocol.io)
+server that lets either assistant use EDOPro's rules engine. It builds the board, plays both players,
 answers from what the engine actually does, and checks Konami's official Q&As.
 
 > **You:** My opponent activates Reinforcement of the Army. I chain Ash Blossom, and they chain Called
 > by the Grave on my Ash. Does the search still happen?
 
-Claude sets up that board and plays it out. This is the log the engine produces:
+The assistant sets up that board and plays it out. This is the log the engine produces:
 
 ```
 Chain Link 1: P1 activates Reinforcement of the Army (P1 Spell & Trap Zone 1)
@@ -23,7 +23,7 @@ Resolving Chain Link 1 (Reinforcement of the Army)
 Marauding Captain: P1 Deck → P1 hand — by an effect
 ```
 
-Claude then answers with the verdict and the reasoning, and can hand you the board as an EDOPro
+The assistant then answers with the verdict and the reasoning, and can hand you the board as an EDOPro
 puzzle file so you can replay it yourself.
 
 ## How it works
@@ -34,10 +34,10 @@ puzzle file so you can replay it yourself.
   and [card databases](https://github.com/ProjectIgnis/BabelCDB). It runs headless: no EDOPro
   window, lobby or decks.
 - **The harness** talks to the engine through `ctypes`. Every engine prompt becomes a numbered list
-  of options for the player who has to decide, and Claude answers by number or by option text.
+  of options for the player who has to decide, and the assistant answers by number or by option text.
   Response windows where nobody has a relevant effect are skipped, so a test takes a handful of
   calls. The log is written the way a judge would describe the chain.
-- **Boards are EDOPro puzzle scripts.** Every scenario Claude builds opens in EDOPro's Puzzle mode,
+- **Boards are EDOPro puzzle scripts.** Every scenario the assistant builds opens in EDOPro's Puzzle mode,
   where one person controls both players.
 - **Duels are saved as their list of answers.** The engine is deterministic, so undo and server
   restarts simply replay them.
@@ -59,20 +59,30 @@ puzzle file so you can replay it yourself.
 
 There's also a `judge` prompt that takes a ruling question.
 
-## Use it in Claude
+## Connect ChatGPT or Claude
 
-On claude.ai or Claude Desktop, go to **Settings → Connectors → Add custom connector** and enter
-your server's URL:
+Both clients use the same server URL:
 
 ```
 https://<your host>/<access key>/mcp
 ```
 
+### ChatGPT
+
+In [ChatGPT Plugins](https://chatgpt.com/plugins) on the web, select **+ → Add custom MCP server**.
+Name it YGO Judge, enter the server URL above, and select **No authentication**. Create the plugin,
+install it, then start a Work chat and mention `@YGO Judge` when asking a ruling question.
+
+### Claude
+
+On claude.ai or Claude Desktop, go to **Settings → Connectors → Add custom connector** and enter
+the same server URL.
+
 The connector then also works in the Claude iOS and Android apps. Free Claude accounts can add one
 custom connector. Then just ask your question.
 
 The access key is a secret part of the URL. Requests without it get a 404, so treat the URL like a
-password.
+password even though ChatGPT's connection uses **No authentication**.
 
 ## Self-hosting
 
@@ -120,7 +130,7 @@ uv run ygo-judge         # http://127.0.0.1:8000/<access key>/mcp, key in state/
 ## Accuracy
 
 The engine is not a judge. Project Ignis scripts follow OCG rulings, TCG rulings sometimes differ,
-and scripts can have bugs, especially for new cards. That's why Claude is told to:
+and scripts can have bugs, especially for new cards. That's why the assistant is told to:
 
 - check the official Q&As;
 - say when the engine and the rulings disagree;
