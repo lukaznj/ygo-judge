@@ -35,12 +35,13 @@ puzzle file so you can replay it yourself.
   window, lobby or decks.
 - **The harness** talks to the engine through `ctypes`. Every engine prompt becomes a numbered list
   of options for the player who has to decide, and the assistant answers by number or by option text.
-  Response windows where nobody has a relevant effect are skipped, so a test takes a handful of
-  calls. The log is written the way a judge would describe the chain.
+  Only response windows with no legal effects and forced choices are skipped. Zones, battle
+  positions, card ordering and legal responses are chosen explicitly. The log is written the way a
+  judge would describe the chain.
 - **Boards are EDOPro puzzle scripts.** Every scenario the assistant builds opens in EDOPro's Puzzle mode,
   where one person controls both players.
 - **Duels are saved as their list of answers.** The engine is deterministic, so undo and server
-  restarts simply replay them.
+  restarts replay them only when the engine, scripts, card data and harness rules still match.
 - **Rulings** come from the [YGOrg card database](https://db.ygoresources.com): Konami's FAQ
   entries and Q&As, translated, and cached locally.
 
@@ -49,7 +50,7 @@ puzzle file so you can replay it yourself.
 | Tool | What it does |
 | --- | --- |
 | `find_card` | Looks up cards by (fuzzy) name or passcode, with full text and stats |
-| `start_duel` | Builds a board and starts in P1's Main Phase 1. Covers hand, field, GY, banished, Deck, Extra Deck, summon type, Xyz Materials, equips, continuous targets, counters and LP |
+| `start_duel` | Builds a board on P1's turn 1 and stops at the first legal decision. Covers hand, field, GY, banished, Deck, Extra Deck, summon type, Xyz Materials, equips, continuous targets, counters and LP |
 | `choose` | Answers decisions by option number or text; several can be queued |
 | `get_state` | Board, full log and the pending decision |
 | `undo` | Takes back decisions to try the other branch |
@@ -61,7 +62,8 @@ There's also a `judge` prompt that takes a ruling question.
 
 ### Turn and phase rules
 
-Every test starts in P1's Main Phase 1 of turn 1. Normal first-turn rules apply: P1 cannot enter
+Every test starts on P1's turn 1 and stops at the first legal decision, usually Main Phase 1.
+Legal Draw/Standby Phase activation windows are shown too. Normal first-turn rules apply: P1 cannot enter
 the Battle Phase or Main Phase 2 on that turn. An effect that requires Main Phase 2, such as
 The Flute of Guiding Dragon's Graveyard draw effect, cannot be used on turn 1.
 
@@ -70,8 +72,50 @@ turn as well to reach P1's next turn (turn 3). Check the turn and phase shown in
 drawing a conclusion. Cards that must have been sent to the GY this turn must actually be sent
 there during that turn; placing them in the starting GY does not reproduce that history.
 
-Older versions enabled a puzzle option that incorrectly allowed a Battle Phase on turn 1.
-Saved duels from those versions must be restarted with `start_duel` and retested.
+Normal Draw Phase draws apply from turn 2 onward. Decks are empty unless supplied: include cards or
+`deck_filler` when advancing turns, or the player can lose by being unable to draw. The starting
+Deck order is top card first; subsequent shuffles happen normally and are deterministic for a given
+`seed`. No opening hand is drawn because the scenario explicitly supplies the players' hands.
+
+### Scenario history and decisions
+
+For revival-restricted monsters in the GY or banished zone, specify whether the required summon
+procedure was completed. A bare name is rejected when that history is needed. For example:
+
+```json
+{
+  "p1": {
+    "hand": ["Monster Reborn"],
+    "graveyard": [{"card": "Stardust Dragon", "properly_summoned": true}]
+  }
+}
+```
+
+Use `false` if it was sent directly from the Extra Deck. These entries also accept `summoned` and
+`summoned_from` when the previous summon matters. Field monsters accept `properly_summoned` too;
+a natural Fusion/Ritual/Synchro/Xyz/Link summon implies completion by default, while other summon
+histories for restricted monsters require an explicit value. Other events, used effects and
+this-turn restrictions must still be played out. Unsupported setup fields are rejected.
+
+Every meaningful decision is shown, including all legal response windows, zones, battle positions,
+card ordering and rock-paper-scissors. The old `stop_at_every_window` option has been removed;
+this behavior is always enabled. Pass explicitly when declining a legal response. Integer choices
+are zero-based option indices; string choices match labels first. For Reasoning, `"7"` declares
+Level 7, while integer `7` chooses option index 7 (Level 8).
+
+Engine/card-script errors invalidate a simulation. Fix the cause and start a new duel; an unavailable
+effect in a failed simulation is not evidence that the activation is illegal.
+
+### Saved-duel compatibility
+
+Older versions changed first-turn phases, normal draws, shuffling and decision handling. Their saved
+duels must be restarted with `start_duel` and retested. Saved duels now include a fingerprint of the
+engine binary, card scripts, databases and strings as well as a harness rules version. Asset changes
+require a fresh duel instead of replaying answers against different code. Restart the server after
+changing local engine/card assets; container updates already restart it.
+
+Every image build runs the regression suite against its bundled engine and card data before it can
+publish. Pull requests build and test the image without publishing it.
 
 ## Connect ChatGPT or Claude
 

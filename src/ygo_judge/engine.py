@@ -113,9 +113,11 @@ class QueryInfo(C.Structure):
     ]
 
 
+LIBRARY_PATH = Path(os.environ.get("OCGCORE_LIB", ROOT / "build" / ("libocgcore.dylib" if sys.platform == "darwin" else "libocgcore.so")))
+
+
 def _load_library() -> C.CDLL:
-    default = ROOT / "build" / ("libocgcore.dylib" if sys.platform == "darwin" else "libocgcore.so")
-    lib = C.CDLL(os.environ.get("OCGCORE_LIB", str(default)))
+    lib = C.CDLL(str(LIBRARY_PATH))
     lib.OCG_CreateDuel.argtypes = [C.POINTER(C.c_void_p), C.POINTER(DuelOptions)]
     lib.OCG_DestroyDuel.argtypes = [C.c_void_p]
     lib.OCG_StartDuel.argtypes = [C.c_void_p]
@@ -167,7 +169,7 @@ class Engine:
             x = ((x ^ (x >> 27)) * 0x94D049BB133111EB) & 0xFFFFFFFFFFFFFFFF
             opts.seed[i] = (x ^ (x >> 31)) or 1
         opts.flags = flags
-        opts.team1 = opts.team2 = Player(8000, 0, 0)
+        opts.team1 = opts.team2 = Player(8000, 0, 1)
         opts.cardReader = self._cb_card
         opts.scriptReader = self._cb_script
         opts.logHandler = self._cb_log

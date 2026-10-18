@@ -113,31 +113,43 @@ class Duel:
         self.decision: Decision | None = None
         self.result = ""
         self.decisions = 0
-        self.stop_at_every_window = False
         self._retry = False
         self._tributed = False  # a Tribute for a summon was just made
         self._finish_unselect = False
         self.engine = E.Engine(setup.seed, E.DUEL_MODE_MR5, cards.fill, cards.script, self._on_log)
-        for lib in ("constant.lua", "utility.lua"):
-            if not self.engine.load_script(cards.script(lib) or b"", lib):
-                raise RuntimeError(f"Could not load {lib}: {self.errors[-1:] or 'missing'}")
-        if not self.engine.load_script(self.puzzle.encode(), "scenario.lua"):
-            raise ValueError("The board setup failed in the engine: " + " | ".join(self.errors[-3:]))
-        decode(self.engine.messages())  # setup messages (field reload, hint); nothing to log
-        self.engine.start()
-        self._run()
-        for response, chosen in responses:
-            self._send(response, chosen)
+        try:
+            for lib in ("constant.lua", "utility.lua"):
+                if not self.engine.load_script(cards.script(lib) or b"", lib):
+                    raise RuntimeError(f"Could not load {lib}: {self.errors[-1:] or 'missing'}")
+            if not self.engine.load_script(self.puzzle.encode(), "scenario.lua"):
+                raise ValueError("The board setup failed in the engine: " + " | ".join(self.errors[-3:]))
+            self.ensure_valid()
+            decode(self.engine.messages())  # setup messages (field reload, hint); nothing to log
+            self.engine.start()
+            self._run()
+            for response, chosen in responses:
+                self._send(response, chosen)
+        except Exception:
+            self.engine.close()
+            raise
 
     # ------------------------------------------------------------------ engine loop
     def _on_log(self, text: str, kind: int) -> None:
         if kind == E.LOG_ERROR:
             self.errors.append(text.strip())
 
+    def ensure_valid(self) -> None:
+        if self.errors:
+            raise E.EngineError(
+                "Simulation invalid due to engine/script errors; do not use it for a ruling. "
+                "Start a new duel after fixing the error: " + " | ".join(self.errors[-5:])
+            )
+
     def _run(self) -> None:
         """Process until the engine waits for an answer or the duel ends."""
         for _ in range(100_000):
             status = self.engine.process()
+            self.ensure_valid()
             prompt = None
             for msg in decode(self.engine.messages()):
                 if msg.name == "RETRY":
@@ -158,6 +170,7 @@ class Duel:
         raise RuntimeError("The engine did not stop (possible infinite loop in a card script).")
 
     def _send(self, response: bytes, chosen: bool) -> None:
+        self.ensure_valid()
         self._retry = False
         self.responses.append((response, chosen))
         if chosen:
@@ -174,6 +187,7 @@ class Duel:
     def play(self, choices: list) -> str:
         """Answer decisions with `choices` (each used at the first decision it fits), handle
         trivial decisions automatically, and stop at the next real decision."""
+        self.ensure_valid()
         start, errors = len(self.log), len(self.errors)
         queue, notes = deque(choices), []
         for _ in range(MAX_STEPS):
@@ -264,6 +278,9 @@ class Duel:
         if isinstance(choice, bool):
             choice = "yes" if choice else "no"
         if isinstance(choice, str) and choice.strip().isdigit():
+            matches = [i for i, option in enumerate(d.options) if option.label == choice.strip() and i not in taken]
+            if len(matches) == 1:
+                return matches[0]
             choice = int(choice)
         if isinstance(choice, int):
             if 0 <= choice < len(d.options) and choice not in taken:
@@ -428,7 +445,7 @@ class Duel:
                 title = f"{who} may respond to Chain Link {len(self.chain)} ({self.name(link['code'])})"
             else:
                 title = f"{who} may activate an effect{f' ({self.event_hint})' if self.event_hint else ''}"
-            idle = not d["chains"] or (d["spe_count"] == 0 and not self.stop_at_every_window)
+            idle = not d["chains"]
             auto = _i32(-1) if idle else None
         return Decision("chain", p, title, opts, auto=auto)
 
@@ -509,7 +526,7 @@ class Duel:
         opts = [Option(self.where(Loc(*z)), value=z) for z in zones]
         count = d["count"]
         decision = Decision(kind, p, f"{who}: {hint or 'choose a zone'}", opts, pick=(count, count))
-        if kind == "place":
+        if count == len(opts):
             decision.auto = self._multi(decision, list(range(count)))
         return decision
 
@@ -518,7 +535,7 @@ class Duel:
 
     def _ask_select_position(self, d, p, who, hint) -> Decision:
         opts = [Option(POSITIONS[bit].capitalize(), _i32(bit)) for bit in (1, 2, 4, 8) if d["positions"] & bit]
-        default = next(o.response for o in opts)
+        default = opts[0].response if len(opts) == 1 else None
         return Decision("position", p, f"{who}: choose the battle position of {self.name(d['code'])}", opts, auto=default)
 
     def _ask_select_counter(self, d, p, who, hint) -> Decision:
@@ -530,7 +547,7 @@ class Duel:
         opts = [Option(self.label(c["code"], c["loc"]), value=i) for i, c in enumerate(d["cards"])]
         what = "order these effects on the chain (first = lowest Chain Link)" if kind == "sort_chain" else "order these cards (first = top)"
         decision = Decision(kind, p, f"{who}: {what}", opts, pick=(len(opts), len(opts)))
-        if kind == "sort_card" or len(opts) < 2:
+        if len(opts) < 2:
             decision.auto = bytes([0xFF])  # keep the engine's order
         return decision
 
@@ -558,7 +575,6 @@ class Duel:
             p,
             f"{who}: rock paper scissors",
             [Option("Rock", _i32(1)), Option("Paper", _i32(2)), Option("Scissors", _i32(3))],
-            auto=_i32(1),
         )
 
     # ------------------------------------------------------------------ log
@@ -832,6 +848,7 @@ class Duel:
         return "\n".join(lines)
 
     def render(self, log_start: int, errors_start: int, notes: list[str], full_log: bool = False) -> str:
+        self.ensure_valid()
         out = [self.header()]
         log = self.log if full_log else self.log[log_start:]
         if log:

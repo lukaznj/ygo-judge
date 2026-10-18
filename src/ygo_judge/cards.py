@@ -15,6 +15,7 @@ DATA = Path(os.environ.get("YGO_DATA", ROOT / "vendor"))
 TYPE_MONSTER, TYPE_SPELL, TYPE_TRAP = 0x1, 0x2, 0x4
 TYPE_NORMAL, TYPE_EFFECT, TYPE_FUSION, TYPE_RITUAL = 0x10, 0x20, 0x40, 0x80
 TYPE_SYNCHRO, TYPE_TOKEN, TYPE_XYZ, TYPE_PENDULUM, TYPE_LINK = 0x2000, 0x4000, 0x800000, 0x1000000, 0x4000000
+TYPE_SPSUMMON = 0x2000000
 EXTRA_DECK_TYPES = TYPE_FUSION | TYPE_SYNCHRO | TYPE_XYZ | TYPE_LINK
 
 # Link arrows, bit order of LINK_MARKER_* in constant.lua.
@@ -55,6 +56,7 @@ def normalize(name: str) -> str:
 
 class CardDB:
     def __init__(self, data_dir: Path = DATA):
+        self.data_dir = data_dir
         self.scripts = data_dir / "CardScripts"
         self.cards: dict[int, Card] = {}
         for path in sorted((data_dir / "BabelCDB").glob("*.cdb")):
