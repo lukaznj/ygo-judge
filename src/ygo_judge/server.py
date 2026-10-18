@@ -15,14 +15,15 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
 
 from .cards import CardDB
+from .compatibility import simulation_fingerprint
 from .duel import ChoiceError, Duel
-from .engine import ROOT
+from .engine import ROOT, EngineError
 from .rulings import rulings
 from .scenario import Setup
 
 STATE = Path(os.environ.get("STATE_DIR", ROOT / "state"))
 MAX_LIVE_DUELS = 64
-DUEL_RULES_VERSION = 2  # Version 1 allowed a Battle Phase on turn 1; its responses cannot be replayed safely.
+DUEL_RULES_VERSION = 3  # Normal draws/shuffles, explicit decisions and summon history.
 
 
 def _setting(name: str) -> str:
@@ -44,18 +45,24 @@ Do not infer that an effect is legal from card text or FAQ alone; reproduce its 
 
 1. Look up every card with find_card and use the exact names it returns.
 2. Build the smallest board that reproduces the situation with start_duel. P1 is the turn player: the
-   duel starts in P1's Main Phase 1 of turn 1, with no Battle Phase or Main Phase 2. For going-second
-   questions, put that player's cards in p2 and end P1's turn with choose. For P1's next turn, end
-   P2's turn as well. Verify the turn and phase in the returned state; never treat a later-turn test
+   duel starts on turn 1, stopping at the first legal decision (usually Main Phase 1). It has no
+   Battle Phase or Main Phase 2. For going-second questions, put that player's cards in p2 and end
+   P1's turn with choose. For P1's next turn, end P2's turn as well. Verify the turn and phase in the returned state; never treat a later-turn test
    as proof for turn 1. Set Spells/Traps can be activated right away. Decks are empty unless
-   you list cards (add deck_filler when effects draw, mill or need a Deck). Things that must already
-   have happened this turn (a Normal Summon, a used once-per-turn effect) have to be played out.
+   you list cards. Normal Draw Phase draws apply from turn 2; add deck_filler for later turns
+   and effects that draw or mill. Shuffles use the seed. For revival-restricted monsters placed in
+   the GY or banished, use {"card": "name", "properly_summoned": true/false} to specify history.
+   Do not guess this history. Things that must already have happened this turn (a Normal Summon,
+   a used once-per-turn effect) have to be played out.
 3. Answer decisions with choose. Every decision lists numbered options for one player; answer with the
-   number or the option's text. You can queue several choices; each is used at the first decision it
-   fits. Moments where nobody has a relevant response are skipped automatically.
+   integer index or the option's text (numeric strings match numeric labels). You can queue several
+   choices; each is used at the first decision it fits. Only windows with no legal responses and
+   forced single choices are skipped.
+   Choose zones, positions, card order and rock-paper-scissors explicitly; pass legal responses explicitly.
 4. An option that isn't listed is not legal right now: "can X respond here?" is answered by whether
    the engine offers it. The log shows chain links, negations, costs, missed timings and damage.
-5. Use undo to try the other branch (e.g. with and without a response).
+5. A simulation reporting engine/script errors is invalid evidence; fix the cause and start again.
+   Use undo to try the other branch (e.g. with and without a response).
 6. Check get_rulings for official Konami Q&As. The scripts follow OCG rulings, and scripts can have
    bugs, so say when the engine and the rulings disagree, or when a TCG ruling may differ.
 7. Answer with a short verdict first, then the chain of events from the log, then caveats. Offer
@@ -73,6 +80,7 @@ class Duels:
 
     def __init__(self):
         self.live: OrderedDict[str, Duel] = OrderedDict()
+        self.fingerprint = simulation_fingerprint(cards.data_dir)
         # ponytail: one lock for every duel; per-duel locks if many people play at once
         self.lock = threading.RLock()
 
@@ -90,25 +98,34 @@ class Duels:
         path = self._path(duel_id)
         if duel_id in self.live:
             self.live.move_to_end(duel_id)
+            self.live[duel_id].ensure_valid()
             return self.live[duel_id]
         if not path.exists():
             raise ValueError(f"Unknown duel id {duel_id!r}; start a new one with start_duel.")
         data = json.loads(path.read_text())
         if data.get("rules_version", 1) != DUEL_RULES_VERSION:
             raise ValueError(
-                "This saved duel uses incompatible simulation rules (older duels allowed a Battle Phase on turn 1). "
+                "This saved duel uses incompatible simulation rules. "
                 "Start a new duel with start_duel and retest the ruling."
             )
+        if data.get("simulation_fingerprint") != self.fingerprint:
+            raise ValueError("This saved duel uses different engine/card assets. Start a new duel with start_duel and retest the ruling.")
         responses = [(bytes.fromhex(r), chosen) for r, chosen in data["responses"]]
         duel = Duel(cards, Setup.model_validate(data["setup"]), duel_id, responses)
         self._keep(duel)
         return duel
 
     def save(self, duel: Duel) -> None:
+        duel.ensure_valid()
         path = self._path(duel.id)
         path.parent.mkdir(parents=True, exist_ok=True)
         responses = [[r.hex(), chosen] for r, chosen in duel.responses]
-        path.write_text(json.dumps({"rules_version": DUEL_RULES_VERSION, "setup": duel.setup.model_dump(), "responses": responses}))
+        path.write_text(json.dumps({
+            "rules_version": DUEL_RULES_VERSION,
+            "simulation_fingerprint": self.fingerprint,
+            "setup": duel.setup.model_dump(),
+            "responses": responses,
+        }))
 
     def _keep(self, duel: Duel) -> None:
         self.live[duel.id] = duel
@@ -127,7 +144,7 @@ def _guard(fn):
         try:
             with duels.lock:
                 return fn(*args, **kwargs)
-        except (ValueError, ChoiceError) as e:
+        except (ValueError, ChoiceError, EngineError) as e:
             return f"Error: {e}"
 
     return run
@@ -146,9 +163,9 @@ def find_card(query: str, limit: int = 5) -> str:
 @mcp.tool(annotations=PLAY, structured_output=False)
 @_guard
 def start_duel(setup: Setup) -> str:
-    """Build a board and start a test duel. P1 is the turn player and starts in Main Phase 1 of turn 1
-    (no Battle Phase or Main Phase 2). For going second, put your cards in p2 and use choose to end
-    P1's turn; end P2's turn too to reach P1's next turn. Cards are given by exact name or passcode.
+    """Build a board and start turn 1 with P1 as the turn player. Stops at the first legal decision,
+    usually Main Phase 1, but earlier activation windows are shown too (no Battle Phase or Main Phase 2).
+    For going second, put your cards in p2 and use choose to end P1's turn; end P2's turn too to reach P1's next turn. Cards are given by exact name or passcode.
     Returns the duel id, the board and the first decision."""
 
     duel = duels.create(setup)
@@ -159,15 +176,15 @@ def start_duel(setup: Setup) -> str:
 
 @mcp.tool(annotations=PLAY, structured_output=False)
 @_guard
-def choose(duel_id: str, choices: list[int | str | list[int | str]], stop_at_every_window: bool = False) -> str:
+def choose(duel_id: str, choices: list[int | str | list[int | str]]) -> str:
     """Answer decisions in a duel. Each choice is an option number, (part of) an option's text, or a
     list of those for decisions that pick several things. Choices are used in order, each at the first
-    decision it fits; trivial decisions and response windows where nobody has a relevant effect are
-    handled automatically. Returns what happened and the next decision. Set stop_at_every_window to
-    also stop whenever a player could activate a free-chain effect."""
+    decision it fits. Only forced single choices and response windows with no legal effects are
+    handled automatically. Every legal response, zone, position and ordering choice is shown.
+    Integer choices are zero-based indices; strings match option text first, including numeric labels.
+    Returns what happened and the next decision."""
 
     duel = duels.get(duel_id)
-    duel.stop_at_every_window = stop_at_every_window
     update = duel.play(choices)
     duels.save(duel)
     return update

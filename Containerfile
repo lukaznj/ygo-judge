@@ -10,7 +10,7 @@ ARG DATA_VERSION=
 RUN echo "data $DATA_VERSION" && scripts/fetch-data.sh vendor && scripts/build-engine.sh vendor/ygopro-core build \
 	&& rm -rf vendor/CardScripts/.git vendor/BabelCDB/.git
 
-FROM python:3.13-slim
+FROM python:3.13-slim AS runtime
 COPY --from=ghcr.io/astral-sh/uv:0.9 /uv /bin/uv
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
@@ -26,3 +26,11 @@ ENV HOST=0.0.0.0 PORT=8000 STATE_DIR=/data OCGCORE_LIB=/app/build/libocgcore.so 
 VOLUME /data
 EXPOSE 8000
 CMD ["/app/.venv/bin/ygo-judge"]
+
+# Test the exact engine and card assets that will ship, before the final image can be built.
+FROM runtime AS test
+COPY tests ./tests
+RUN uv sync --frozen && .venv/bin/pytest -q && touch /app/.tests-passed
+
+FROM runtime AS final
+COPY --from=test /app/.tests-passed /app/.tests-passed

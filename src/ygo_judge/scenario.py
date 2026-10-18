@@ -8,9 +8,21 @@ aux.BeginPuzzle).
 import re
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from .cards import EXTRA_DECK_TYPES, TYPE_FUSION, TYPE_LINK, TYPE_MONSTER, TYPE_RITUAL, TYPE_SYNCHRO, TYPE_XYZ, Card, CardDB, normalize
+from .cards import (
+    EXTRA_DECK_TYPES,
+    TYPE_FUSION,
+    TYPE_LINK,
+    TYPE_MONSTER,
+    TYPE_RITUAL,
+    TYPE_SPSUMMON,
+    TYPE_SYNCHRO,
+    TYPE_XYZ,
+    Card,
+    CardDB,
+    normalize,
+)
 
 CardRef = str | int
 
@@ -36,7 +48,20 @@ SUMMON_FROM = {
 POSITIONS = {"attack": "POS_FACEUP_ATTACK", "defense": "POS_FACEUP_DEFENSE", "set": "POS_FACEDOWN_DEFENSE"}
 
 
-class Monster(BaseModel):
+class ScenarioModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class StoredCard(ScenarioModel):
+    card: CardRef
+    properly_summoned: bool | None = Field(
+        None, description="Whether its required summon procedure was completed before it left the field. Required for revival-restricted monsters."
+    )
+    summoned: Literal[tuple(SUMMON_TYPES)] | None = Field(None, description="Previous summon type, if relevant to the question.")
+    summoned_from: Literal[tuple(SUMMON_FROM)] | None = None
+
+
+class Monster(ScenarioModel):
     card: CardRef = Field(description="Card name or passcode.")
     zone: int | Literal["EMZ left", "EMZ right"] | None = Field(
         None,
@@ -44,16 +69,19 @@ class Monster(BaseModel):
     )
     position: Literal["attack", "defense", "set"] = Field("attack", description='"set" = face-down Defense Position.')
     summoned: Literal[tuple(SUMMON_TYPES)] | None = Field(
-        None, description="How it was summoned. Default: its Extra Deck summon type for Extra Deck monsters, otherwise Normal Summon."
+        None, description="How it was summoned. Default: its Extra Deck summon type for Extra Deck monsters, otherwise Normal Summon (Special Summon for Special Summon-only monsters)."
     )
     summoned_from: Literal[tuple(SUMMON_FROM)] | None = Field(
         None, description='Where it was summoned from. Default: "extra deck" for Extra Deck monsters, otherwise "hand".'
+    )
+    properly_summoned: bool | None = Field(
+        None, description="Whether its required summon procedure was completed. Inferred for the natural Fusion/Ritual/Synchro/Xyz/Link summon; otherwise specify it for revival-restricted monsters."
     )
     materials: list[CardRef] = Field(default_factory=list, description="Xyz Materials attached to it.")
     counters: dict[str, int] = Field(default_factory=dict, description='Counters on it, e.g. {"Spell Counter": 2}.')
 
 
-class SpellTrap(BaseModel):
+class SpellTrap(ScenarioModel):
     card: CardRef = Field(description="Card name or passcode.")
     zone: int | None = Field(None, description="Spell & Trap Zone 1-5. Default: next free zone.")
     face_up: bool = Field(False, description="false = Set (face-down). Set cards can be activated right away.")
@@ -66,37 +94,37 @@ class SpellTrap(BaseModel):
     counters: dict[str, int] = Field(default_factory=dict)
 
 
-class FieldSpell(BaseModel):
+class FieldSpell(ScenarioModel):
     card: CardRef
     face_up: bool = True
     counters: dict[str, int] = Field(default_factory=dict)
 
 
-class PlayerSetup(BaseModel):
-    lp: int = 8000
+class PlayerSetup(ScenarioModel):
+    lp: int = Field(8000, ge=1, le=0x7FFFFFFF)
     hand: list[CardRef] = Field(default_factory=list)
     deck: list[CardRef] = Field(default_factory=list, description="Main Deck, top card first. Empty unless listed.")
     extra_deck: list[CardRef] = Field(default_factory=list)
-    graveyard: list[CardRef] = Field(default_factory=list)
-    banished: list[CardRef] = Field(default_factory=list, description="Face-up banished cards.")
+    graveyard: list[CardRef | StoredCard] = Field(default_factory=list)
+    banished: list[CardRef | StoredCard] = Field(default_factory=list, description="Face-up banished cards.")
     monsters: list[Monster] = Field(default_factory=list)
     spells_traps: list[SpellTrap] = Field(default_factory=list)
     field_spell: FieldSpell | None = None
     pendulum_zones: list[CardRef] = Field(default_factory=list, description="Up to 2 Pendulum Scales: [left, right].")
     deck_filler: int = Field(
-        0, description="Extra vanilla cards (Mystical Shine Ball) under the listed deck, for effects that draw, mill or need a deck."
+        0, ge=0, description="Extra vanilla cards (Mystical Shine Ball) under the listed deck, for effects that draw, mill or need a deck."
     )
 
 
-class Setup(BaseModel):
-    """A board to test on. P1 is the turn player: the duel starts in P1's Main Phase 1 of turn 1,
+class Setup(ScenarioModel):
+    """A board to test on. P1 is the turn player: the duel starts on turn 1 and stops at the first legal decision (usually Main Phase 1),
     with no Battle Phase or Main Phase 2 on that turn. Both players are controlled by you.
     For later turns, use choose to end turns: P2 plays turn 2, P1 plays turn 3, and so on."""
 
     p1: PlayerSetup = Field(default_factory=PlayerSetup)
     p2: PlayerSetup = Field(default_factory=PlayerSetup)
     title: str = Field("", description="Short description of what is being tested.")
-    seed: int = Field(1, description="Random seed (coin tosses, dice, random selections).")
+    seed: int = Field(1, description="Random seed (shuffles, coin tosses, dice, random selections).")
 
 
 FILLER = 39552864  # Mystical Shine Ball: vanilla, no archetype
@@ -151,9 +179,9 @@ def build_puzzle(setup: Setup, cards: CardDB) -> str:
         "--Both players are yours: play P2's responses too.",
         'Debug.SetAIName("P2")',
         "--Normal first-turn rules: no Battle Phase or Main Phase 2 on turn 1.",
-        "Debug.ReloadFieldBegin(DUEL_PSEUDO_SHUFFLE,5)",
-        f"Debug.SetPlayerInfo(0,{setup.p1.lp},0,0)",
-        f"Debug.SetPlayerInfo(1,{setup.p2.lp},0,0)",
+        "Debug.ReloadFieldBegin(0,5)",
+        f"Debug.SetPlayerInfo(0,{setup.p1.lp},0,1)",
+        f"Debug.SetPlayerInfo(1,{setup.p2.lp},0,1)",
     ]
     links: list[tuple[int, str, SpellTrap]] = []
     for player, ps in enumerate((setup.p1, setup.p2)):
@@ -176,10 +204,17 @@ def build_puzzle(setup: Setup, cards: CardDB) -> str:
             if card.is_(TYPE_MONSTER) and card.is_(EXTRA_DECK_TYPES):
                 raise ValueError(f"{card.name} is an Extra Deck monster and can't be in the hand.")
             b.add(card, player, "LOCATION_HAND", 0, "POS_FACEDOWN")
-        for ref in ps.graveyard:
-            b.add(b.card(ref), player, "LOCATION_GRAVE", 0, "POS_FACEUP")
-        for ref in ps.banished:
-            b.add(b.card(ref), player, "LOCATION_REMOVED", 0, "POS_FACEUP")
+        for location, entries in (("LOCATION_GRAVE", ps.graveyard), ("LOCATION_REMOVED", ps.banished)):
+            for entry in entries:
+                history = entry if isinstance(entry, StoredCard) else StoredCard(card=entry)
+                card = b.card(history.card)
+                if _needs_procedure(card) and history.properly_summoned is None:
+                    raise ValueError(f"{card.name}: specify properly_summoned true or false in its GY/banished entry.")
+                var = b.add(card, player, location, 0, "POS_FACEUP", proc=bool(history.properly_summoned))
+                if history.summoned or history.properly_summoned or history.summoned_from:
+                    summoned = history.summoned or _natural_summon(card)
+                    source = history.summoned_from or ("extra deck" if card.is_(EXTRA_DECK_TYPES) else "hand")
+                    b.lines.append(f"Debug.PreSummon({var},{SUMMON_TYPES[summoned]},{SUMMON_FROM[source]})")
 
         used = set()
         for m in ps.monsters:
@@ -199,9 +234,15 @@ def build_puzzle(setup: Setup, cards: CardDB) -> str:
             if seq in used:
                 raise ValueError(f"{tag} Monster Zone {m.zone} is used twice.")
             used.add(seq)
-            var = b.add(card, player, "LOCATION_MZONE", seq, POSITIONS[m.position], proc=True)
-            b.placed.append((player, var, card))
             summoned = m.summoned or _natural_summon(card)
+            proper = m.properly_summoned
+            if proper is None:
+                natural_procedure = summoned in ("fusion", "ritual", "synchro", "xyz", "link") and summoned == _natural_summon(card)
+                if _needs_procedure(card) and not natural_procedure:
+                    raise ValueError(f"{card.name}: specify properly_summoned true or false for this summon history.")
+                proper = natural_procedure
+            var = b.add(card, player, "LOCATION_MZONE", seq, POSITIONS[m.position], proc=proper)
+            b.placed.append((player, var, card))
             source = m.summoned_from or ("extra deck" if card.is_(EXTRA_DECK_TYPES) else "hand")
             b.lines.append(f"Debug.PreSummon({var},{SUMMON_TYPES[summoned]},{SUMMON_FROM[source]})")
             for ref in m.materials:
@@ -251,8 +292,12 @@ def build_puzzle(setup: Setup, cards: CardDB) -> str:
     return "\n".join(b.lines) + "\n"
 
 
+def _needs_procedure(card: Card) -> bool:
+    return card.is_(TYPE_MONSTER) and card.is_(EXTRA_DECK_TYPES | TYPE_RITUAL | TYPE_SPSUMMON)
+
+
 def _natural_summon(card: Card) -> str:
     for bit, kind in ((TYPE_LINK, "link"), (TYPE_XYZ, "xyz"), (TYPE_SYNCHRO, "synchro"), (TYPE_FUSION, "fusion"), (TYPE_RITUAL, "ritual")):
         if card.is_(bit):
             return kind
-    return "normal"
+    return "special" if card.is_(TYPE_SPSUMMON) else "normal"
