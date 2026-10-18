@@ -90,7 +90,8 @@ class PlayerSetup(BaseModel):
 
 class Setup(BaseModel):
     """A board to test on. P1 is the turn player: the duel starts in P1's Main Phase 1 of turn 1,
-    and P1 may conduct a Battle Phase. Both players are controlled by you."""
+    with no Battle Phase or Main Phase 2 on that turn. Both players are controlled by you.
+    For later turns, use choose to end turns: P2 plays turn 2, P1 plays turn 3, and so on."""
 
     p1: PlayerSetup = Field(default_factory=PlayerSetup)
     p2: PlayerSetup = Field(default_factory=PlayerSetup)
@@ -149,7 +150,8 @@ def build_puzzle(setup: Setup, cards: CardDB) -> str:
         f"--YGO Judge scenario{': ' + setup.title.splitlines()[0] if setup.title else ''}",
         "--Both players are yours: play P2's responses too.",
         'Debug.SetAIName("P2")',
-        "Debug.ReloadFieldBegin(DUEL_ATTACK_FIRST_TURN+DUEL_PSEUDO_SHUFFLE,5)",
+        "--Normal first-turn rules: no Battle Phase or Main Phase 2 on turn 1.",
+        "Debug.ReloadFieldBegin(DUEL_PSEUDO_SHUFFLE,5)",
         f"Debug.SetPlayerInfo(0,{setup.p1.lp},0,0)",
         f"Debug.SetPlayerInfo(1,{setup.p2.lp},0,0)",
     ]

@@ -59,6 +59,20 @@ puzzle file so you can replay it yourself.
 
 There's also a `judge` prompt that takes a ruling question.
 
+### Turn and phase rules
+
+Every test starts in P1's Main Phase 1 of turn 1. Normal first-turn rules apply: P1 cannot enter
+the Battle Phase or Main Phase 2 on that turn. An effect that requires Main Phase 2, such as
+The Flute of Guiding Dragon's Graveyard draw effect, cannot be used on turn 1.
+
+To test going second, put that player's cards in `p2` and use `choose` to end P1's turn. End P2's
+turn as well to reach P1's next turn (turn 3). Check the turn and phase shown in the result before
+drawing a conclusion. Cards that must have been sent to the GY this turn must actually be sent
+there during that turn; placing them in the starting GY does not reproduce that history.
+
+Older versions enabled a puzzle option that incorrectly allowed a Battle Phase on turn 1.
+Saved duels from those versions must be restarted with `start_duel` and retested.
+
 ## Connect ChatGPT or Claude
 
 Both clients use the same server URL:

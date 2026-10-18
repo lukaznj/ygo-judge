@@ -56,3 +56,70 @@ def test_unknown_cards_are_rejected_not_guessed():
     with pytest.raises(ValueError, match="Unknown card"):
         db.resolve("Nonexistent Card Blah")
     assert db.resolve("ash blossom").name == "Ash Blossom & Joyous Spring"
+
+
+FLUTE = 93871599
+
+
+def flute_board() -> dict:
+    return {
+        "hand": [FLUTE],
+        "monsters": [{"card": "Dark Magician"}],
+        "deck": ["Blue-Eyes White Dragon"],
+        "deck_filler": 2,
+    }
+
+
+def activate_flute(d: Duel) -> None:
+    d.play([f"Activate {db.get(FLUTE).name}", "Blue-Eyes White Dragon", "face-up Attack"])
+    assert db.get(FLUTE).name in zone(d, "GY:")
+    assert "Blue-Eyes White Dragon" in d.board()
+
+
+def test_first_turn_has_no_battle_phase_or_main_phase_2_for_flute():
+    d = duel(flute_board(), {"deck_filler": 2})
+    activate_flute(d)
+    assert (d.turn, d.turn_player, d.phase) == (1, 0, 0x04)
+    assert "Enter the Battle Phase" not in d.describe_decision()
+    assert "Go to Main Phase 2" not in d.describe_decision()
+    assert f"Activate {db.get(FLUTE).name}" not in d.describe_decision()
+    for choice in ("Enter the Battle Phase", "Go to Main Phase 2"):
+        d.play([choice])
+        assert (d.turn, d.turn_player, d.phase) == (1, 0, 0x04)
+    d.play(["End the turn"])
+    assert (d.turn, d.turn_player, d.phase) == (2, 1, 0x04)
+    assert "P1 enters the Battle Phase" not in d.log
+    assert "P1 enters the Main Phase 2" not in d.log
+    assert not d.errors
+
+
+@pytest.mark.parametrize("turn,player", [(2, 1), (3, 0)])
+def test_flute_draw_is_legal_after_battle_phase_on_later_turns(turn, player):
+    players = [{"deck_filler": 2}, {"deck_filler": 2}]
+    players[player] = flute_board()
+    d = duel(*players)
+    d.play(["End the turn"] * (turn - 1))
+    assert (d.turn, d.turn_player, d.phase) == (turn, player, 0x04)
+    activate_flute(d)
+    d.play(["Enter the Battle Phase", "Go to Main Phase 2"])
+    assert d.phase == 0x100
+    assert f"Activate {db.get(FLUTE).name}" in d.describe_decision()
+    out = d.play([f"Activate {db.get(FLUTE).name}"])
+    assert f"P{player + 1} draws Mystical Shine Ball" in out
+    assert db.get(FLUTE).name in zone(d, "Banished:")
+    rebuilt = Duel(db, d.setup, "test", d.responses)
+    assert rebuilt.log == d.log and rebuilt.board() == d.board()
+    d.undo(1)
+    assert d.phase == 0x100
+    assert f"Activate {db.get(FLUTE).name}" in d.describe_decision()
+    assert not d.errors
+
+
+def test_flute_sent_on_turn_1_cannot_draw_on_turn_3():
+    d = duel(flute_board(), {"deck_filler": 2})
+    activate_flute(d)
+    d.play(["End the turn", "End the turn", "Enter the Battle Phase", "Go to Main Phase 2"])
+    assert (d.turn, d.turn_player, d.phase) == (3, 0, 0x100)
+    assert db.get(FLUTE).name in zone(d, "GY:")
+    assert f"Activate {db.get(FLUTE).name}" not in d.describe_decision()
+    assert not d.errors
