@@ -22,6 +22,7 @@ from .scenario import Setup
 
 STATE = Path(os.environ.get("STATE_DIR", ROOT / "state"))
 MAX_LIVE_DUELS = 64
+DUEL_RULES_VERSION = 2  # Version 1 allowed a Battle Phase on turn 1; its responses cannot be replayed safely.
 
 
 def _setting(name: str) -> str:
@@ -38,11 +39,15 @@ def public_url() -> str:
 INSTRUCTIONS = """\
 Test Yu-Gi-Oh! card interactions on EDOPro's rules engine (Project Ignis card scripts). You play both
 players, so the engine, not memory, decides what is legal and what happens.
+Match the question's turn and phase: turn 1 normally has no Battle Phase or Main Phase 2.
+Do not infer that an effect is legal from card text or FAQ alone; reproduce its activation timing.
 
 1. Look up every card with find_card and use the exact names it returns.
 2. Build the smallest board that reproduces the situation with start_duel. P1 is the turn player: the
-   duel starts in P1's Main Phase 1 of turn 1 and P1 may attack. If the question happens on the other
-   player's turn, swap who is P1. Set Spells/Traps can be activated right away. Decks are empty unless
+   duel starts in P1's Main Phase 1 of turn 1, with no Battle Phase or Main Phase 2. For going-second
+   questions, put that player's cards in p2 and end P1's turn with choose. For P1's next turn, end
+   P2's turn as well. Verify the turn and phase in the returned state; never treat a later-turn test
+   as proof for turn 1. Set Spells/Traps can be activated right away. Decks are empty unless
    you list cards (add deck_filler when effects draw, mill or need a Deck). Things that must already
    have happened this turn (a Normal Summon, a used once-per-turn effect) have to be played out.
 3. Answer decisions with choose. Every decision lists numbered options for one player; answer with the
@@ -89,6 +94,11 @@ class Duels:
         if not path.exists():
             raise ValueError(f"Unknown duel id {duel_id!r}; start a new one with start_duel.")
         data = json.loads(path.read_text())
+        if data.get("rules_version", 1) != DUEL_RULES_VERSION:
+            raise ValueError(
+                "This saved duel uses incompatible simulation rules (older duels allowed a Battle Phase on turn 1). "
+                "Start a new duel with start_duel and retest the ruling."
+            )
         responses = [(bytes.fromhex(r), chosen) for r, chosen in data["responses"]]
         duel = Duel(cards, Setup.model_validate(data["setup"]), duel_id, responses)
         self._keep(duel)
@@ -98,7 +108,7 @@ class Duels:
         path = self._path(duel.id)
         path.parent.mkdir(parents=True, exist_ok=True)
         responses = [[r.hex(), chosen] for r, chosen in duel.responses]
-        path.write_text(json.dumps({"setup": duel.setup.model_dump(), "responses": responses}))
+        path.write_text(json.dumps({"rules_version": DUEL_RULES_VERSION, "setup": duel.setup.model_dump(), "responses": responses}))
 
     def _keep(self, duel: Duel) -> None:
         self.live[duel.id] = duel
@@ -137,8 +147,9 @@ def find_card(query: str, limit: int = 5) -> str:
 @_guard
 def start_duel(setup: Setup) -> str:
     """Build a board and start a test duel. P1 is the turn player and starts in Main Phase 1 of turn 1
-    (Battle Phase allowed). Cards are given by exact name or passcode. Returns the duel id, the board
-    and the first decision."""
+    (no Battle Phase or Main Phase 2). For going second, put your cards in p2 and use choose to end
+    P1's turn; end P2's turn too to reach P1's next turn. Cards are given by exact name or passcode.
+    Returns the duel id, the board and the first decision."""
 
     duel = duels.create(setup)
     update = duel.play([])
